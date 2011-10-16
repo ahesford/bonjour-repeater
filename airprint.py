@@ -10,6 +10,9 @@ browsetype = "_ipp._tcp"
 # Add a _universal subtype when repeating the record
 rpttype = browsetype + ",_universal"
 
+# A prefix to add to repeated service names
+prefix = "AirPrint"
+
 # The Unirast key-value pair as a TXT record field
 urf = ('URF', 'W8,CP1,RS600-600')
 
@@ -23,7 +26,7 @@ repeater = {}
 cbresult = []
 
 
-def reglog(sdRef, flags, errorCode, name, regtype, domain):
+def register(sdRef, flags, errorCode, name, regtype, domain):
 	'''
 	This function is invoked after a service registration. It does nothing
 	but announce the registration for logging.
@@ -37,7 +40,7 @@ def reglog(sdRef, flags, errorCode, name, regtype, domain):
 		cbresult.append(False)
 		return 
 
-	print 'Repeating', srvmsg
+	print 'Advertising', srvmsg
 	cbresult.append(True)
 
 
@@ -90,26 +93,32 @@ def browser(sdRef, flags, interfaceIndex,
 	This function is invoked when an instance of the browsed service is
 	identified, or when the browse attempt fails. If the instance can be
 	successfully resolved, a new service is created and advertised by
-	prepending "AirPrint" to the service name, adding a "_universal"
-	subtype to the browsed type, and copying the target host, port and TXT
-	record of the original service.
+	prepending a prefix to the service name, modifying the service type,
+	and copying the target host, port and modified TXT record of the
+	original service.
 	'''
 	# Do nothing if there was a browse error
 	if errorCode != mdns.kDNSServiceErr_NoError: return
 
+	# Generate a unique key to identify the service to be repeated
+	rptkey = ','.join(repr(s)
+			for s in [serviceName, regtype, replyDomain, interfaceIndex])
+
 	try:
 		# Attempt to deregister the repeated service
-		repeater[serviceName].close()
+		repeater[rptkey].close()
 		# Attempt to eliminate the serviceName from the repeat list
-		del repeater[serviceName]
+		del repeater[rptkey]
 		print 'Stopped repeating', serviceName
-	except: pass
+	except KeyError: pass
 
 	# The service has been flagged as removed, nothing left to do
 	if not (flags & mdns.kDNSServiceFlagsAdd): return
+	# Don't repeat services whose names start with the prefix
+	if serviceName[:len(prefix)] == prefix: return
 
-	# Create a new service name by prepending "AirPrint" to the old one
-	rptname = "AirPrint " + serviceName
+	# Create a new service name by prepending a prefix to the old one
+	rptname = prefix + ' ' + serviceName
 
 	# The service has been added, attempt to resolve the details
 	resref = mdns.DNSServiceResolve(0, interfaceIndex,
@@ -118,21 +127,21 @@ def browser(sdRef, flags, interfaceIndex,
 	try:
 		# Wait for the resolution to finish and return the record data
 		rec = waitmdnscb(resref)
-		if rec is None: raise Exception('Failed to resolve service')
+		if rec is None: raise mdns.BonjourError(mdns.kDNSServiceErr_Unknown)
 
 		# Register the new service
 		regref = mdns.DNSServiceRegister(0, interfaceIndex, rptname,
-				rpttype, replyDomain, rec[0], rec[1], rec[2], reglog)
+				rpttype, replyDomain, rec[0], rec[1], rec[2], register)
 		
 		try:
 			# Copy the finished registration if successful
-			if waitmdnscb(regref): repeater[serviceName] = regref
-			else: raise Exception('Failed to register service')
-		except:
+			if waitmdnscb(regref): repeater[rptkey] = regref
+			else: raise mdns.BonjourError(mdns.kDNSServiceErr_Unknown)
+		except mdns.BonjourError:
 			# Only close the reference in the event of a failure
 			regref.close()
 			print 'Failed to register service', rptname
-	except: print 'Service', serviceName, 'not repeated'
+	except mdns.BonjourError: print 'Service', serviceName, 'not repeated'
 	finally: resref.close()
 
 
