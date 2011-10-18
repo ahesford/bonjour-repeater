@@ -9,11 +9,11 @@
         <array>
 		<string>/usr/local/sbin/bonjour-repeater.py</string>
 		<string>-s</string>
-		<string>_ipp._tcp</string>
+		<string>_ipp._tcp,_cups</string>
 		<string>-r</string>
 		<string>_ipp._tcp,_universal</string>
 		<string>-f</string>
-		<string>URF=W8,CP1,RS600-600</string>
+		<string>URF=none</string>
 		<string>-p</string>
 		<string>AirPrint</string>
         </array>

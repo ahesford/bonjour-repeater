@@ -2,6 +2,9 @@
 
 import sys, getopt, select, pybonjour as mdns
 
+# Used to grab the Bonjour name
+from SystemConfiguration import SCDynamicStoreCopyLocalHostName
+
 
 class BonjourRepeater:
 	'''
@@ -10,7 +13,8 @@ class BonjourRepeater:
 	service name that is modified by adding a prefix.
 	'''
 
-	def __init__(self, svctype, rpttype, fields, prefix="Repeated", timeout=5):
+	def __init__(self, svctype, rpttype, fields,
+			prefix="Repeated", timeout=5, restrict=None):
 		'''
 		Initialize the class to listen for services of type svctype,
 		repeat with a service type rpttype, add TXT record entries in
@@ -20,9 +24,10 @@ class BonjourRepeater:
 		Browse requests will listen for timeout seconds before failing.
 
 		The service will not be repeated if any of the specified TXT
-		record fields already exists, or if the service name already
-		starts with the prefix. This prevents infinitely recursive
-		repeater behavior.
+		record fields already exists. This prevents infinitely
+		recursive repeater behavior. The service will also not be
+		repeated if restrict is a non-empty string and the target host
+		name does not match its contents.
 		'''
 
 		# Ensure the prefix is not empty
@@ -53,6 +58,10 @@ class BonjourRepeater:
 
 		# This variable controls the browse/repeat thread loop
 		self.browse = False
+
+		# Set the restriction string, if desired
+		if restrict is not None and len(restrict) > 0: self.restrict = restrict
+		else: self.restrict = None
 
 
 	def register(self, sdRef, flags, err, name, rtype, dom):
@@ -89,6 +98,12 @@ class BonjourRepeater:
 
 		# Grab the existing keys
 		keys = dict(txtdict).keys()
+
+		# Don't continue if the host is restricted and the current
+		# target doesn't match the restricted host
+		if self.restrict is not None and self.restrict != tgt:
+			self.cbresult.append(None)
+			return
 
 		# Don't continue if one of the new keys already exists
 		for field in self.fields:
@@ -135,9 +150,6 @@ class BonjourRepeater:
 
 		# Do nothing if there was a browse error
 		if err != mdns.kDNSServiceErr_NoError: return
-
-		# Ignore service names already starting with the prefix
-		if svc[:len(self.prefix)] == self.prefix: return
 
 		# Generate a unique key to identify the service to be repeated
 		rptkey = ','.join(repr(s) for s in [svc, rtype, dom, ifidx])
@@ -223,52 +235,61 @@ class BonjourRepeater:
 
 
 def usage (progname):
-	print >> sys.stderr, 'Usage: %s [-h] <-s type> <-r type> <-f key=value> [-p prefix] [-t timeout]' % progname
-	print >> sys.stderr, '\t-h: display this message'
-	print >> sys.stderr, '\t-s type: Bonjour type for which to browse'
-	print >> sys.stderr, '\t-r type: Bonjour type to use when repeating services'
-	print >> sys.stderr, '\t-f key=value: add the key=value field to the TXT record'
-	print >> sys.stderr, '\t   Multiple fields may be added with additional -f flags'
-	print >> sys.stderr, '\t-p prefix: string to prepend to service name (default: Repeated)'
-	print >> sys.stderr, '\t-t timeout: timeout in seconds for Bonjour requests (default: 5)'
+	print >> sys.stderr, 'Usage: %s [-h] <-s type> <-r type> <-f key=value> [-p prefix] [-t timeout] [-n]' % progname
+	print >> sys.stderr, '  -h: display this message'
+	print >> sys.stderr, '  -s type: Bonjour type for which to browse'
+	print >> sys.stderr, '  -r type: Bonjour type to use when repeating services'
+	print >> sys.stderr, '  -f key=value: add the key=value field to the TXT record'
+	print >> sys.stderr, '     Multiple fields may be added with additional -f flags'
+	print >> sys.stderr, '  -p prefix: string to prepend to service name (default: "Repeated")'
+	print >> sys.stderr, '  -t timeout: timeout in seconds for Bonjour requests (default: 5)'
+	print >> sys.stderr, '  -n: Repeat all services found on network (default: only repeat local services)'
 
 
 if __name__ == '__main__':
 	# Parse the option list
-	optlist, args = getopt.getopt(sys.argv[1:], 's:r:f:p:t:h')
+	optlist, args = getopt.getopt(sys.argv[1:], 's:r:f:p:t:hn')
 
 	# Initialize the values for the repeater class
 	svcname, rptname, prefix, timeout = [None]*4
+	# Initialize the list of fields to be appended to the TXT record
 	fields = []
+	# By default, only repeat printers shared by the current machine
+	noisy = False
 
 	for opt in optlist:
 		if opt[0] == '-h':
 			usage(sys.argv[0])
 			sys.exit(128)
-		elif opt[0] == '-s':
-			svcname = opt[1]
-		elif opt[0] == '-r':
-			rptname = opt[1]
-		elif opt[0] == '-f':
-			fields.append(opt[1])
-		elif opt[0] == '-p':
-			prefix = opt[1]
-		elif opt[0] == '-t':
-			timeout = int(opt[1])
+		elif opt[0] == '-s': svcname = opt[1]
+		elif opt[0] == '-r': rptname = opt[1]
+		elif opt[0] == '-f': fields.append(opt[1])
+		elif opt[0] == '-p': prefix = opt[1]
+		elif opt[0] == '-t': timeout = int(opt[1])
+		elif opt[0] == '-n': noisy = True
 
 	if svcname is None or rptname is None or len(fields) == 0:
 		usage(sys.argv[0])
 		sys.exit(128)
 
 	# A dictionary of optional keyword arguments
-	optionals = {}
-	if prefix is not None: optionals['prefix'] = prefix
-	if timeout is not None: optionals['timeout'] = timeout
+	kwargs = {}
+
+	if not noisy: 
+		# Grab the local Bonjour name to restrict repetition
+		hostname = SCDynamicStoreCopyLocalHostName(None) + ".local."
+		kwargs['restrict'] = hostname
+
+	# Add the desired prefix
+	if prefix is not None: kwargs['prefix'] = prefix
+	# Set the desired timeout for Bonjour requests
+	if timeout is not None: kwargs['timeout'] = timeout
 
 	# Build the desired repeater
-	rpt = BonjourRepeater(svcname, rptname, fields, **optionals)
+	rpt = BonjourRepeater(svcname, rptname, fields, **kwargs)
 
-	print 'Starting Bonjour repeater'
+	if noisy: print 'Starting Bonjour repeater for all network hosts'
+	else: print 'Starting Bonjour repeater for target host', hostname
 
 	# Start the listening loop
 	try: rpt.repeatloop()
