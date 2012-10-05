@@ -13,18 +13,19 @@ class BonjourRepeater:
 	service name that is modified by adding a prefix.
 	'''
 
-	def __init__(self, svctype, rpttype, fields,
+	def __init__(self, svctype, rpttype, afields, rfields=[],
 			prefix="Repeated", timeout=5, restrict=None):
 		'''
 		Initialize the class to listen for services of type svctype,
 		repeat with a service type rpttype, add TXT record entries in
-		the list fields (each with format "key=value"), and modify the
-		service name by adding the specified prefix.
+		the list afields (each with format "key=value"), replace any
+		TXT records in the list rfields (each with format "key=value")
+		and modify the service name by adding the specified prefix.
 
 		Browse requests will listen for timeout seconds before failing.
 
 		The service will not be repeated if any of the specified TXT
-		record fields already exists. This prevents infinitely
+		records in afields already exists. This prevents infinitely
 		recursive repeater behavior. The service will also not be
 		repeated if restrict is a non-empty string and the target host
 		name does not match its contents.
@@ -34,7 +35,7 @@ class BonjourRepeater:
 		if len(prefix) < 1:
 			raise ValueError('Prefix must be non-empty.')
 		# Ensure at least one new TXT field is specified
-		if len(fields) < 1:
+		if len(afields) < 1:
 			raise ValueError('At least one new TXT field must be specified.')
 
 		# Copy the service and repeat types and the prefix
@@ -42,10 +43,12 @@ class BonjourRepeater:
 		self.rpttype = rpttype
 		self.prefix = prefix
 
-		# Split each new field into its own list where the first item
-		# is the key and the second item is the value
-		self.fields = [[f[0], '='.join(f[1:])]
-				for f in [f.split('=') for f in fields]]
+		# Split each new or replaced record field into its own dictionary
+		self.afields = dict([[f[0], '='.join(f[1:])]
+			for f in [fv.split('=') for fv in afields]])
+		try: self.rfields = dict([[f[0], '='.join(f[1:])]
+			for f in [fv.split('=') for fv in rfields]])
+		except TypeError: self.rfields = {}
 
 		# Copy the timeout value
 		self.timeout = timeout
@@ -85,8 +88,8 @@ class BonjourRepeater:
 	def resolver(self, sdRef, flags, ifidx, err, name, tgt, port, txt):
 		'''
 		Invoked after a service resolution attempt. If successful, the
-		target host, port, and TXT record (with added fields) are
-		stored in the result buffer for repetition.
+		target host, port, and TXT record (with added and replaced
+		fields) are stored in the result buffer for repetition.
 		'''
 
 		# Do nothing if there was a resolution error
@@ -105,15 +108,19 @@ class BonjourRepeater:
 			self.cbresult.append(None)
 			return
 
-		# Don't continue if one of the new keys already exists
-		for field in self.fields:
-			if field[0] in keys:
+		# Add new records, failing if a matching record already exists
+		for k, v in self.afields.iteritems():
+			if k in keys:
 				self.cbresult.append(None)
 				return
+			else: txtdict[k] = v
 
-		# Add the new keys
-		for field in self.fields:
-			txtdict[field[0]] = field[1]
+		# Replace existing records, failing if a matching record doesn't exist
+		for k, v in self.rfields.iteritems(): 
+			if k not in keys:
+				self.cbresult.append(None)
+				return
+			else: txtdict[k] = v
 
 		# Store the host, port and TXT record to be repeated
 		self.cbresult.append([tgt, port, txtdict])
@@ -235,12 +242,14 @@ class BonjourRepeater:
 
 
 def usage (progname):
-	print >> sys.stderr, 'Usage: %s [-h] <-s type> <-r type> <-f key=value> [-p prefix] [-t timeout] [-n]' % progname
+	print >> sys.stderr, 'Usage: %s [-h] <-s type> <-r type> <-f key=value> [-p prefix] [-t timeout] [-F key=value] [-n]' % progname
 	print >> sys.stderr, '  -h: display this message'
 	print >> sys.stderr, '  -s type: Bonjour type for which to browse'
 	print >> sys.stderr, '  -r type: Bonjour type to use when repeating services'
 	print >> sys.stderr, '  -f key=value: add the key=value field to the TXT record'
 	print >> sys.stderr, '     Multiple fields may be added with additional -f flags'
+	print >> sys.stderr, '  -F key=value: replace the key=value field in the TXT record'
+	print >> sys.stderr, '     Multiple fields may be added with additional -F flags'
 	print >> sys.stderr, '  -p prefix: string to prepend to service name (default: "Repeated")'
 	print >> sys.stderr, '  -t timeout: timeout in seconds for Bonjour requests (default: 5)'
 	print >> sys.stderr, '  -n: Repeat all services found on network (default: only repeat local services)'
@@ -248,12 +257,12 @@ def usage (progname):
 
 if __name__ == '__main__':
 	# Parse the option list
-	optlist, args = getopt.getopt(sys.argv[1:], 's:r:f:p:t:hn')
+	optlist, args = getopt.getopt(sys.argv[1:], 's:r:f:F:p:t:hn')
 
 	# Initialize the values for the repeater class
 	svcname, rptname, prefix, timeout = [None]*4
-	# Initialize the list of fields to be appended to the TXT record
-	fields = []
+	# Initialize lists of fields to be appended or replaced in TXT record
+	afields, rfields = [], []
 	# By default, only repeat printers shared by the current machine
 	noisy = False
 
@@ -263,12 +272,13 @@ if __name__ == '__main__':
 			sys.exit(128)
 		elif opt[0] == '-s': svcname = opt[1]
 		elif opt[0] == '-r': rptname = opt[1]
-		elif opt[0] == '-f': fields.append(opt[1])
+		elif opt[0] == '-f': afields.append(opt[1])
+		elif opt[0] == '-F': rfields.append(opt[1])
 		elif opt[0] == '-p': prefix = opt[1]
 		elif opt[0] == '-t': timeout = int(opt[1])
 		elif opt[0] == '-n': noisy = True
 
-	if svcname is None or rptname is None or len(fields) == 0:
+	if svcname is None or rptname is None or len(afields) == 0:
 		usage(sys.argv[0])
 		sys.exit(128)
 
@@ -286,7 +296,7 @@ if __name__ == '__main__':
 	if timeout is not None: kwargs['timeout'] = timeout
 
 	# Build the desired repeater
-	rpt = BonjourRepeater(svcname, rptname, fields, **kwargs)
+	rpt = BonjourRepeater(svcname, rptname, afields, rfields, **kwargs)
 
 	if noisy: print 'Starting Bonjour repeater for all network hosts'
 	else: print 'Starting Bonjour repeater for target host', hostname

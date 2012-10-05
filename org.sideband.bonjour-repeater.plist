@@ -13,7 +13,9 @@
 		<string>-r</string>
 		<string>_ipp._tcp,_universal</string>
 		<string>-f</string>
-		<string>URF=none</string>
+		<string>URF=W8,CP1,RS300-600,DM3,SRGB24</string>
+		<string>-F</string>
+		<string>pdl=application/pdf,application/postscript,image/jpeg,image/png,image/pwg-raster,image/urf</string>
 		<string>-p</string>
 		<string>AirPrint</string>
         </array>
