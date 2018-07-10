@@ -77,11 +77,11 @@ class BonjourRepeater:
 
 		if err != mdns.kDNSServiceErr_NoError:
 			# Note a failure to register
-			print 'Failed to register', srvmsg
+			print('Failed to register', srvmsg)
 			self.cbresult.append(False)
 			return
 
-		print 'Advertising', srvmsg
+		print('Advertising', srvmsg)
 		self.cbresult.append(True)
 
 
@@ -100,7 +100,7 @@ class BonjourRepeater:
 		txtdict = mdns.TXTRecord.parse(txt)
 
 		# Grab the existing keys
-		keys = dict(txtdict).keys()
+		keys = list(dict(txtdict).keys())
 
 		# Don't continue if the host is restricted and the current
 		# target doesn't match the restricted host
@@ -109,14 +109,14 @@ class BonjourRepeater:
 			return
 
 		# Add new records, failing if a matching record already exists
-		for k, v in self.afields.iteritems():
+		for k, v in self.afields.items():
 			if k in keys:
 				self.cbresult.append(None)
 				return
 			else: txtdict[k] = v
 
 		# Replace existing records, failing if a matching record doesn't exist
-		for k, v in self.rfields.iteritems(): 
+		for k, v in self.rfields.items():
 			if k not in keys:
 				self.cbresult.append(None)
 				return
@@ -169,7 +169,7 @@ class BonjourRepeater:
 			self.repeater[rptkey].close()
 			# Attempt to eliminate the service name from the repeat list
 			del self.repeater[rptkey]
-			print 'Stopped repeating', svc
+			print('Stopped repeating', svc)
 		except KeyError: pass
 
 		# Nothing to do if the service is noted as removed
@@ -202,8 +202,8 @@ class BonjourRepeater:
 			except mdns.BonjourError:
 				# Only close the reference in the event of a failure
 				regref.close()
-				print 'Failed to register service', rptname
-		except mdns.BonjourError: print 'Service', svc, 'not repeated'
+				print('Failed to register service', rptname)
+		except mdns.BonjourError: print('Service', svc, 'not repeated')
 		finally: resref.close()
 
 	def repeatloop(self):
@@ -234,7 +234,7 @@ class BonjourRepeater:
 					mdns.DNSServiceProcessResult(browseref)
 		finally:
 			# Attempt to close all open repeater references
-			for v in self.repeater.values(): v.close()
+			for v in list(self.repeater.values()): v.close()
 			# Reset the repeater dictionary
 			self.repeater = {}
 			# Close the open browse request
@@ -242,17 +242,17 @@ class BonjourRepeater:
 
 
 def usage (progname):
-	print >> sys.stderr, 'Usage: %s [-h] <-s type> <-r type> <-f key=value> [-p prefix] [-t timeout] [-F key=value] [-n]' % progname
-	print >> sys.stderr, '  -h: display this message'
-	print >> sys.stderr, '  -s type: Bonjour type for which to browse'
-	print >> sys.stderr, '  -r type: Bonjour type to use when repeating services'
-	print >> sys.stderr, '  -f key=value: add the key=value field to the TXT record'
-	print >> sys.stderr, '     Multiple fields may be added with additional -f flags'
-	print >> sys.stderr, '  -F key=value: replace the key=value field in the TXT record'
-	print >> sys.stderr, '     Multiple fields may be added with additional -F flags'
-	print >> sys.stderr, '  -p prefix: string to prepend to service name (default: "Repeated")'
-	print >> sys.stderr, '  -t timeout: timeout in seconds for Bonjour requests (default: 5)'
-	print >> sys.stderr, '  -n: Repeat all services found on network (default: only repeat local services)'
+	print('Usage: %s [-h] <-s type> <-r type> <-f key=value> [-p prefix] [-t timeout] [-F key=value] [-n]' % progname, file=sys.stderr)
+	print('  -h: display this message', file=sys.stderr)
+	print('  -s type: Bonjour type for which to browse', file=sys.stderr)
+	print('  -r type: Bonjour type to use when repeating services', file=sys.stderr)
+	print('  -f key=value: add the key=value field to the TXT record', file=sys.stderr)
+	print('     Multiple fields may be added with additional -f flags', file=sys.stderr)
+	print('  -F key=value: replace the key=value field in the TXT record', file=sys.stderr)
+	print('     Multiple fields may be added with additional -F flags', file=sys.stderr)
+	print('  -p prefix: string to prepend to service name (default: "Repeated")', file=sys.stderr)
+	print('  -t timeout: timeout in seconds for Bonjour requests (default: 5)', file=sys.stderr)
+	print('  -n: Repeat all services found on network (default: only repeat local services)', file=sys.stderr)
 
 
 if __name__ == '__main__':
@@ -285,7 +285,7 @@ if __name__ == '__main__':
 	# A dictionary of optional keyword arguments
 	kwargs = {}
 
-	if not noisy: 
+	if not noisy:
 		# Grab the local Bonjour name to restrict repetition
 		hostname = SCDynamicStoreCopyLocalHostName(None) + ".local."
 		kwargs['restrict'] = hostname
@@ -298,11 +298,11 @@ if __name__ == '__main__':
 	# Build the desired repeater
 	rpt = BonjourRepeater(svcname, rptname, afields, rfields, **kwargs)
 
-	if noisy: print 'Starting Bonjour repeater for all network hosts'
-	else: print 'Starting Bonjour repeater for target host', hostname
+	if noisy: print('Starting Bonjour repeater for all network hosts')
+	else: print('Starting Bonjour repeater for target host', hostname)
 
 	# Start the listening loop
 	try: rpt.repeatloop()
 	except KeyboardInterrupt: pass
 
-	print 'All repeated Bonjour services removed'
+	print('All repeated Bonjour services removed')
